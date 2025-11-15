@@ -1,0 +1,15 @@
+[project]
+name = "video-clipper"
+version = "0.1.0"
+description = "Clip multiple videos using a JSON manifest"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "tqdm>=4.0",
+]
+
+[tool.ruff]
+line-length = 120
+
+[project.scripts]
+video-clipper = "video_clipper:main"
