@@ -53,6 +53,7 @@ class VideoClip:
         return output_dir / self.filename
 
 
+# TODO: rename to source
 @dataclass
 class VideoFile:
     filename: str  # relative to input-dir
@@ -292,25 +293,6 @@ def clip_video(
 
     except subprocess.CalledProcessError as e:
         tqdm.write(f"Error creating clip: {e}")
-
-
-def get_file_entry_clips(manifest, filename: str) -> list | None:
-    for file_entry in manifest:
-        original_filename: str = file_entry.get(KEY_ORIGINAL_FILENAME)
-        if original_filename != filename:
-            continue
-
-        if "clips" not in file_entry:
-            print(f"Error: Failed to find {KEY_CLIPS} in entry for {filename}")
-            return None
-
-        return file_entry.get(KEY_CLIPS)
-
-    # If there is no file entry for this file
-    new_entry = {KEY_ORIGINAL_FILENAME: filename, KEY_CLIPS: []}
-    manifest.append(new_entry)
-
-    return new_entry.get(KEY_CLIPS)
 
 
 def add_command(args: argparse.Namespace) -> bool:
