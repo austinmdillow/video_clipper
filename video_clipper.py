@@ -8,6 +8,7 @@ import re
 import shutil
 import sys
 import hashlib
+from typing import Any
 
 KEY_VERSION = "version"
 KEY_VIDEOS = "videos"
@@ -19,28 +20,56 @@ KEY_SHA256_CHECKSUM = "sha256_checksum"
 
 EXAMPLE_MANIFEST = """\
 Example manifest file:
-[
-    {
-        "original": "2593592-15.mp4",
-        "clips": [
-            {
-                "start": "00:10:00",
-                "end": "00:31:56"
-            }.
-            ... more clips
-        ]
+{
+  "version": "1",
+  "videos": {
+    "videoA.mp4": {
+      "clips": {
+        "videoA_0.mp4": {
+          "start": "00:00:27",
+          "end": "00:34:35",
+          "sha256_checksum": "d6513...."
+        },
+        ... more clips
+      }
     },
     ... more videos
-]
+  }
+}
 """
 
 
 @dataclass
 class VideoClip:
-    filename: str
+    filename: str  # relative to output-dir
     start_timestamp: str
     end_timestamp: str
-    sha256_checksum: str  # `none` is used for an unkown hash
+    sha256_checksum: str  # `none` is used for an unknown hash
+
+    @staticmethod
+    def from_json(
+        clip_name: str, clip_json: dict[str, str]
+    ) -> "VideoClip | None":
+        start_timestamp = clip_json.get(KEY_START)
+        if start_timestamp is None:
+            print(
+                f"Missing '{KEY_START}' timestamp of the form 'HH:MM:SS' for clip {clip_name}"
+            )
+            return None
+
+        end_timestamp = clip_json.get(KEY_END)
+        if end_timestamp is None:
+            print(
+                f"Missing '{KEY_END}' timestamp of the form 'HH:MM:SS' for clip {clip_name}"
+            )
+            return None
+
+        sha256_checksum = clip_json.get(KEY_SHA256_CHECKSUM, "none")
+        clip = VideoClip(
+            clip_name, start_timestamp, end_timestamp, sha256_checksum
+        )
+
+        return clip
 
     def to_json(self) -> dict[str, str]:
         return {
@@ -59,6 +88,22 @@ class VideoFile:
     filename: str  # relative to input-dir
     clips: dict[str, VideoClip]
 
+    @staticmethod
+    def from_json(video_name: str, video_json: dict) -> "VideoFile | None":
+        video_file = VideoFile(video_name, {})
+
+        if KEY_CLIPS not in video_json:
+            print(f"Missing '{KEY_CLIPS}' in video entry {video_name}")
+            return None
+
+        for clip_name, clip_json in video_json[KEY_CLIPS].items():
+            clip = VideoClip.from_json(clip_name, clip_json)
+            if clip is None:
+                return None
+            video_file.clips[clip_name] = clip
+
+        return video_file
+
     def to_json(self) -> dict:
         return {
             KEY_CLIPS: {
@@ -69,7 +114,8 @@ class VideoFile:
     def get_filepath(self, input_dir: Path) -> Path:
         return input_dir / self.filename
 
-    def add_new_clip(self, begin: str, end: str, sha256sum="none") -> bool:
+    def add_new_clip(self, begin: str, end: str) -> bool:
+        """Insert a new clip into the VideoFile with a generated name"""
         for clip in self.clips.values():
             if clip.start_timestamp == begin and clip.end_timestamp == end:
                 print(
@@ -87,7 +133,7 @@ class VideoFile:
             )
             if candidate_clip_name not in self.clips:
                 self.clips[candidate_clip_name] = VideoClip(
-                    candidate_clip_name, begin, end, sha256sum
+                    candidate_clip_name, begin, end, "none"
                 )
                 return True
             clip_idx += 1
@@ -98,6 +144,47 @@ class VideoClipperManifest:
     version: str
     video_files: dict[str, VideoFile]
 
+    @staticmethod
+    def from_json_file(manifest_path: Path) -> "VideoClipperManifest | None":
+        try:
+            with open(manifest_path) as f:
+                manifest_json = json.load(f)
+        except Exception as e:
+            print(f"Error loading manifest file {manifest_path}: {e}")
+            return None
+
+        manifest = VideoClipperManifest.from_json(manifest_json)
+        if manifest is None:
+            print(f"Failed to parse manifest {manifest_path}")
+            return None
+
+        return manifest
+
+    @staticmethod
+    def from_json(
+        manifest_json: dict[str, Any],
+    ) -> "VideoClipperManifest | None":
+        if KEY_VERSION not in manifest_json:
+            print(f"Missing '{KEY_VERSION}' in manifest")
+            return None
+
+        manifest = VideoClipperManifest(
+            version=manifest_json[KEY_VERSION], video_files={}
+        )
+
+        if KEY_VIDEOS not in manifest_json:
+            print(f"Missing '{KEY_VIDEOS}' in manifest")
+            return None
+
+        for video_name, video_json in manifest_json[KEY_VIDEOS].items():
+            video_file = VideoFile.from_json(video_name, video_json)
+
+            if video_file is None:
+                return None
+            manifest.video_files[video_name] = video_file
+
+        return manifest
+
     def to_json(self) -> dict:
         return {
             KEY_VERSION: self.version,
@@ -107,17 +194,21 @@ class VideoClipperManifest:
             },
         }
 
-    def add_new_clip(
-        self, input_filename: str, begin: str, end: str, sha256sum="none"
-    ) -> bool:
+    def add_new_clip(self, input_filename: str, begin: str, end: str) -> bool:
+        """Insert a new clip into the manifest. A new VideoFile will be created if needed."""
+
         file_entry = self.video_files.get(input_filename)
 
         if file_entry is None:
             file_entry = VideoFile(input_filename, {})
             self.video_files[input_filename] = file_entry
-        return file_entry.add_new_clip(begin, end, sha256sum)
+        return file_entry.add_new_clip(begin, end)
 
-    def validate(self, input_dir: Path, output_dir: Path) -> bool:
+    def validate_input_files(self, input_dir: Path) -> bool:
+        """Check that the input data in the manifest is valid.
+        Does not check clips that have or have not been made
+        """
+
         for video_file in self.video_files.values():
             video_filepath = video_file.get_filepath(input_dir)
 
@@ -174,8 +265,9 @@ def save_manifest(
     no_backup: bool,
     dryrun=False,
 ):
+    # TODO: sort the manifest by filename order. Maybe clip name or clip start time order as well?
     if dryrun:
-        # Nothing was modified, so there is nothing to save
+        # Nothing should be modified in dryrun mode, so there is nothing to save
         return
 
     if not no_backup:
@@ -190,51 +282,6 @@ def is_valid_time_format(timestamp: str) -> bool:
         return False
     hours, minutes, seconds = map(int, timestamp.split(":"))
     return 0 <= hours <= 24 and 0 <= minutes <= 60 and 0 <= seconds <= 60
-
-
-def parse_manifest(manifest_json) -> VideoClipperManifest | None:
-    if KEY_VERSION not in manifest_json:
-        print(f"Missing '{KEY_VERSION}' in manifest")
-        return None
-
-    manifest = VideoClipperManifest(
-        version=manifest_json[KEY_VERSION], video_files={}
-    )
-
-    if KEY_VIDEOS not in manifest_json:
-        print(f"Missing '{KEY_VIDEOS}' in manifest")
-        return None
-
-    for video_name, video_json in manifest_json[KEY_VIDEOS].items():
-        video_file = VideoFile(video_name, {})
-        manifest.video_files[video_name] = video_file
-
-        if KEY_CLIPS not in video_json:
-            print(f"Missing '{KEY_CLIPS}' in video entry {video_name}")
-            return None
-
-        for clip_name, clip_json in video_json[KEY_CLIPS].items():
-            start_timestamp: str = clip_json.get(KEY_START)
-            if start_timestamp is None:
-                print(
-                    f"Missing '{KEY_START}' timstamp of the form 'HH:MM:SS' for clip {clip_name}"
-                )
-                return None
-
-            end_timestamp: str = clip_json.get(KEY_END)
-            if end_timestamp is None:
-                print(
-                    f"Missing '{KEY_END}' timstamp of the form 'HH:MM:SS' for clip {clip_name}"
-                )
-                return None
-
-            sha256_checksum = clip_json.get(KEY_SHA256_CHECKSUM, "none")
-            clip = VideoClip(
-                clip_name, start_timestamp, end_timestamp, sha256_checksum
-            )
-            video_file.clips[clip_name] = clip
-
-    return manifest
 
 
 def should_clip_video(
@@ -296,16 +343,8 @@ def clip_video(
 
 
 def add_command(args: argparse.Namespace) -> bool:
-    try:
-        with open(args.manifest) as f:
-            manifest_json = json.load(f)
-    except Exception as e:
-        print(f"Error loading manifest file: {e}")
-        return False
-
-    manifest = parse_manifest(manifest_json)
+    manifest = VideoClipperManifest.from_json_file(args.manifest)
     if manifest is None:
-        print(f"Failed to load manifest {args.manifest}")
         return False
 
     if not is_valid_time_format(args.start):
@@ -334,12 +373,12 @@ def clip_command(args: argparse.Namespace) -> bool:
         print("FFmpeg is not installed!")
         return False
 
-    # For typehinting only
+    # For type hinting only
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
 
     if args.overwrite:
-        print("Warning: Will overwrite existing clips")
+        print("Warning: Will overwrite existing clips if hashes do not match")
 
     # Check if original dir
     if not input_dir.exists() or not input_dir.is_dir():
@@ -350,20 +389,12 @@ def clip_command(args: argparse.Namespace) -> bool:
         print("Error: output-dir must be an already existing directory")
         return False
 
-    try:
-        with open(args.manifest) as f:
-            manifest_json = json.load(f)
-    except Exception as e:
-        print(f"Error loading manifest file: {e}")
-        return False
-
-    manifest = parse_manifest(manifest_json)
+    manifest = VideoClipperManifest.from_json_file(args.manifest)
     if manifest is None:
-        print(f"Failed to load manifest {args.manifest}")
         return False
 
-    if not manifest.validate(input_dir, output_dir):
-        print(f"Failed to valie manifest {args.manifest}")
+    if not manifest.validate_input_files(input_dir):
+        print(f"Failed to validate manifest {args.manifest}")
         return False
 
     if len(manifest.video_files) == 0:
@@ -391,7 +422,7 @@ def clip_command(args: argparse.Namespace) -> bool:
             clip.get_filepath(output_dir)
         )
 
-    save_manifest(manifest, args.manifest, args.dryrun, args.dryrun)
+    save_manifest(manifest, args.manifest, args.dryrun, dryrun=args.dryrun)
 
     return True
 
@@ -399,42 +430,41 @@ def clip_command(args: argparse.Namespace) -> bool:
 def validate_command(args: argparse.Namespace) -> bool:
     # for intellisense
     input_dir: Path = args.input_dir
-    output_dir: Path = args.output_dir
+    output_dir: Path | None = args.output_dir
 
-    try:
-        with open(args.manifest) as f:
-            manifest_json = json.load(f)
-    except Exception as e:
-        print(f"Error loading manifest file: {e}")
+    if output_dir is None and args.checksum:
+        print(
+            "Error: Must provide --output-dir if you want to check --checksum"
+        )
         return False
 
-    manifest = parse_manifest(manifest_json)
+    manifest = VideoClipperManifest.from_json_file(args.manifest)
     if manifest is None:
-        print(f"Failed to parse manifest {args.manifest}")
         return False
 
-    if not manifest.validate(input_dir, output_dir):
+    if not manifest.validate_input_files(input_dir):
         print("Failed to validate json manifest")
         return False
 
-    if not args.checksum:
-        print("Skipping checksum validation")
-        return True
-
-    all_clips = [
-        clip
-        for video_file in manifest.video_files.values()
-        for clip in video_file.clips.values()
-    ]
     valid = True
 
-    for clip in tqdm(all_clips, desc="Processing clips"):
-        current_hash = sha25_hash_of_file(clip.get_filepath(output_dir))
-        if clip.sha256_checksum != current_hash:
-            tqdm.write(
-                f"Mismatched checksum for clip {clip.get_filepath(output_dir)}!\nExpected {clip.sha256_checksum} Got {current_hash}"
-            )
-            valid = False
+    if args.checksum:
+        all_clips = [
+            clip
+            for video_file in manifest.video_files.values()
+            for clip in video_file.clips.values()
+        ]
+
+        for clip in tqdm(all_clips, desc="Hashing clips"):
+            current_hash = sha25_hash_of_file(clip.get_filepath(output_dir))
+            if clip.sha256_checksum != current_hash:
+                tqdm.write(
+                    f"Mismatched checksum for clip {clip.get_filepath(output_dir)}!\nExpected {clip.sha256_checksum} Got {current_hash}"
+                )
+                valid = False
+    else:
+        print("Skipping checksum validation")
+
     if valid:
         print("OK")
 
@@ -531,8 +561,7 @@ def main():
     validate_parser.add_argument(
         "--output-dir",
         type=Path,
-        required=True,
-        help="Output directory for clips",
+        help="Output directory for clips. Required if you want to check checksums",
     )
     validate_parser.add_argument(
         "--checksum",

@@ -2,6 +2,12 @@
 
 A simple wrapper around `ffmpeg -ss HH:MM:SS -to HH:MM:S` inspired by [ErikThiart/VideoClipper](https://github.com/ErikThiart/VideoClipper).
 
+Goals are
+- quickly generate clips from an original video source without loss of quality or need to re-encode
+- declaratively store clip information in a manifest so clips can be recreated
+- detect if clips need to be recreated due to changes in the manifest or changes on disk
+- see what's going to happen before making changes on disk (`--dryrun`)
+
 
 ## Requirements
 
@@ -15,33 +21,34 @@ A simple wrapper around `ffmpeg -ss HH:MM:SS -to HH:MM:S` inspired by [ErikThiar
 This tool uses a manifest file to describe what videos should be clipped. Paths are relative to `--input-dir`.
 
 ```json
-[
-    {
-        "original": "videoA.mp4",
-        "clips": [
-            {
-                "start": "00:05:00",
-                "end": "00:06:20",
-                "sha256_checksum": "0d3af98334b796efd7f66c152a87c534430d686e024be01509fe50fecc3f9ecf"
+{
+    "version": "1",
+    "videos": {
+        "videoA.mp4": {
+            "clips": {
+                "videoA_0.mp4": {
+                    "start": "00:00:27",
+                    "end": "00:34:35",
+                    "sha256_checksum": "d65135dc..."
+                }
             }
-        ]
-    },
-    {
-        "original": "subfolder/videoB.mp4",
-        "clips": [
-            {
-                "start": "00:00:00",
-                "end": "00:01:00",
-                "sha256_checksum": "9878fadb8d31ff8e8f10fdb796fd8182b6d35a34c6b7e2fed8a45c7c60cb407f"
-            },
-            {
-                "start": "00:00:55",
-                "end": "00:02:30",
-                "sha256_checksum": "56ae1efbdc393b166e23d9b3df8b01673484b2d6b9b84ae766b59dc933afbef5"
+        },
+        "subfolder/videoB.mp4": {
+            "clips": {
+                "videoB_0.mp4": {
+                    "start": "00:00:04",
+                    "end": "00:29:12",
+                    "sha256_checksum": "f02ff133..."
+                },
+                "videoB_1.mp4": {
+                    "start": "00:29:14",
+                    "end": "01:02:45",
+                    "sha256_checksum": "none" // hasn't been clipped
+                }
             }
-        ]
+        }
     }
-]
+}
 ```
 
 Results of above manifest
@@ -64,6 +71,8 @@ $ uv run video_clipper.py clip --manifest example_manifest.json --input-dir ~/Do
 
 ## CLI
 
+You can replace `uv run` with `python3` if you do not have uv installed.
+
 ### `add`
 
 Manually editing the manifest can be tedious. Do this instead.
@@ -76,17 +85,17 @@ $ uv run video_clipper.py add --manifest trim_manifest.json --filename videoA.mp
 
 By default, existing clips will not be overwritten.
 ```bash
-$ uv run video_clipper.py clip --manifest manifest.json --input-dir myvideos/ --output-dir my_clips/
+$ uv run video_clipper.py clip --manifest manifest.json --input-dir videos/ --output-dir clips/
 ```
 
 Check sha256sum of existing files and overwrite if they do not match the manifest.
 ```bash
-$ uv run video_clipper.py clip --manifest manifest.json --input-dir myvideos/ --output-dir my_clips/ --overwrite
+$ uv run video_clipper.py clip --manifest manifest.json --input-dir videos/ --output-dir clips/ --overwrite
 ```
 
 ### `validate`
 
 Include the `--output-dir` to check the sha256sum of the clips.
 ```bash
-$ uv run video_clipper.py validate --manifest manifest.json --input-dir myvideos/ --output-dir my_clips/
+$ uv run video_clipper.py validate --manifest manifest.json --input-dir videos/ --output-dir clips/
 ```
