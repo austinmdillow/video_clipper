@@ -12,5 +12,10 @@ dependencies = [
 [tool.ruff]
 line-length = 79
 
+[dependency-groups]
+dev = [
+    "ruff>=0.14.5",
+]
+
 [project.scripts]
 video-clipper = "video_clipper:main"
