@@ -471,6 +471,58 @@ def validate_command(args: argparse.Namespace) -> bool:
     return valid
 
 
+def prune_command(args: argparse.Namespace) -> bool:
+    # for intellisense
+    output_dir: Path = args.output_dir
+
+    manifest = VideoClipperManifest.from_json_file(args.manifest)
+    if manifest is None:
+        return False
+
+    known_clip_names = {
+        clip_name
+        for video in manifest.video_files.values()
+        for clip_name in video.clips
+    }
+
+    matching_filepaths: set[Path] = set()
+    for video_name in manifest.video_files:
+        video_as_path = Path(video_name)
+        # clips looks like "{video_name}_{idx}.{video_extension}"
+        # TODO: not exactly right, but close enough
+        glob_result = output_dir.glob(
+            f"{video_as_path.stem}_[0-9]*{video_as_path.suffix}"
+        )
+
+        for match in glob_result:
+            if match.name in known_clip_names:
+                continue
+            if not match.is_file():
+                continue
+            matching_filepaths.add(match)
+
+    if len(matching_filepaths) == 0:
+        print(
+            "Found no files that look like a clip and are not in the manifest"
+        )
+        return True
+
+    print("=== WILL DELETE THE BELOW FILES ===")
+    for path_to_delete in matching_filepaths:
+        print(path_to_delete)
+    print("=== WILL DELETE THE ABOVE FILES ===")
+
+    if input("Permanently delete the above files? [y/n]: ") != "y":
+        print("Skipping. Will not delete")
+        return True
+
+    for path_to_delete in matching_filepaths:
+        print(f"Deleting: {path_to_delete}")
+        path_to_delete.unlink()
+
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Create clips from multiple video files",
@@ -533,7 +585,8 @@ def main():
     clip_parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="Overwrite existing file if the expected hash does not equal the existing file hash. Otherwise skip",
+        help="Overwrite existing file if the expected hash does not "
+        "equal the existing file hash. Otherwise skip",
     )
     clip_parser.add_argument(
         "--dryrun",
@@ -569,6 +622,20 @@ def main():
         help="Compare the clip checksum with the actual sha256 hash of the clip",
     )
 
+    ## Prune command
+    prune_parser = subparsers.add_parser(
+        "prune",
+        help="Remove all clip that could have been generated from your manifest "
+        "but are not in the manifest. A clip must match the pattern video_name_idx.video_extension",
+        parents=[base_subparser],
+    )
+    prune_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Directory to prune",
+    )
+
     args = parser.parse_args()
 
     if args.command == "add":
@@ -579,6 +646,9 @@ def main():
             sys.exit(1)
     elif args.command == "validate":
         if not validate_command(args):
+            sys.exit(1)
+    elif args.command == "prune":
+        if not prune_command(args):
             sys.exit(1)
     else:
         print(f"Invalid command '{args.command}'!")
