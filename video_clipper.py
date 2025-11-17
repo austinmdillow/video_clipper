@@ -262,7 +262,7 @@ def sha25_hash_of_file(filepath: Path) -> str:
 def save_manifest(
     manifest: VideoClipperManifest,
     manifest_path: Path,
-    no_backup: bool,
+    no_backup=False,
     dryrun=False,
 ):
     # TODO: sort the manifest by filename order. Maybe clip name or clip start time order as well?
@@ -363,7 +363,7 @@ def add_command(args: argparse.Namespace) -> bool:
 
     manifest.add_new_clip(args.filename, args.start, args.end)
 
-    save_manifest(manifest, args.manifest, args.no_backup)
+    save_manifest(manifest, args.manifest, no_backup=args.no_backup)
 
     return True
 
@@ -422,7 +422,9 @@ def clip_command(args: argparse.Namespace) -> bool:
             clip.get_filepath(output_dir)
         )
 
-    save_manifest(manifest, args.manifest, args.dryrun, dryrun=args.dryrun)
+    save_manifest(
+        manifest, args.manifest, no_backup=args.no_backup, dryrun=args.dryrun
+    )
 
     return True
 
@@ -523,6 +525,18 @@ def prune_command(args: argparse.Namespace) -> bool:
     return True
 
 
+def format_command(args: argparse.Namespace) -> bool:
+    # for intellisense
+
+    manifest = VideoClipperManifest.from_json_file(args.manifest)
+    if manifest is None:
+        return False
+
+    save_manifest(manifest, args.manifest)
+
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Create clips from multiple video files",
@@ -561,7 +575,7 @@ def main():
     add_parser.add_argument(
         "--no-backup",
         action="store_true",
-        help="Do not save a *.backup of your manifest before editing/",
+        help="Do not save a *.backup of your manifest before editing",
     )
 
     ## Clip Parser
@@ -596,7 +610,7 @@ def main():
     clip_parser.add_argument(
         "--no-backup",
         action="store_true",
-        help="Do not save a *.backup of your manifest before editing/",
+        help="Do not save a *.backup of your manifest before editing",
     )
 
     ## Validate Parser
@@ -636,6 +650,18 @@ def main():
         help="Directory to prune",
     )
 
+    ## Format command
+    format_parser = subparsers.add_parser(
+        "format",
+        help="Format your manifest file",
+        parents=[base_subparser],
+    )
+    format_parser.add_argument(
+        "--no-backup",
+        action="store_true",
+        help="Do not save a *.backup of your manifest before formatting",
+    )
+
     args = parser.parse_args()
 
     if args.command == "add":
@@ -649,6 +675,9 @@ def main():
             sys.exit(1)
     elif args.command == "prune":
         if not prune_command(args):
+            sys.exit(1)
+    elif args.command == "format":
+        if not format_command(args):
             sys.exit(1)
     else:
         print(f"Invalid command '{args.command}'!")

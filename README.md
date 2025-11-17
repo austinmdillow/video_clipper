@@ -114,3 +114,11 @@ For video `videoA.mp4`
 ```bash
 $ uv run video_clipper.py prune --manifest manifest.json --output-dir clips/
 ```
+
+### `format`
+
+Format your manifest file in place.
+
+```bash
+$ uv run video_clipper.py format --manifest manifest.json
+```
