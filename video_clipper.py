@@ -438,12 +438,6 @@ def validate_command(args: argparse.Namespace) -> bool:
     input_dir: Path = args.input_dir
     output_dir: Path | None = args.output_dir
 
-    if output_dir is None and args.checksum:
-        print(
-            "Error: Must provide --output-dir if you want to check --checksum"
-        )
-        return False
-
     manifest = VideoClipperManifest.from_json_file(args.manifest)
     if manifest is None:
         return False
@@ -455,6 +449,12 @@ def validate_command(args: argparse.Namespace) -> bool:
     valid = True
 
     if args.checksum:
+        if output_dir is None:
+            print(
+                "Error: Must provide --output-dir if you want to check --checksum"
+            )
+            return False
+
         all_clips = [
             clip
             for video_file in manifest.video_files.values()
