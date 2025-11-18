@@ -12,6 +12,10 @@ dependencies = [
 [tool.ruff]
 line-length = 79
 
+[tool.ruff.lint]
+select=["A", "B", "E", "F", "N"]
+ignore = ["E501"]
+
 [dependency-groups]
 dev = [
     "ruff>=0.14.5",

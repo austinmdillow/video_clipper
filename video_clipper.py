@@ -1,14 +1,15 @@
 import argparse
-from pathlib import Path
-import subprocess
+import hashlib
 import json
-from tqdm import tqdm
-from dataclasses import dataclass
 import re
 import shutil
+import subprocess
 import sys
-import hashlib
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+from tqdm import tqdm
 
 KEY_VERSION = "version"
 KEY_VIDEOS = "videos"
@@ -193,6 +194,9 @@ class VideoClipperManifest:
                 for video in self.video_files.values()
             },
         }
+
+    def sort(self) -> None:
+        self.video_files = dict(sorted(self.video_files.items()))
 
     def add_new_clip(self, input_filename: str, begin: str, end: str) -> bool:
         """Insert a new clip into the manifest. A new VideoFile will be created if needed."""
@@ -532,6 +536,8 @@ def format_command(args: argparse.Namespace) -> bool:
     if manifest is None:
         return False
 
+    manifest.sort()
+
     save_manifest(manifest, args.manifest)
 
     return True
@@ -548,6 +554,7 @@ def main():
     # Common flags
     base_subparser = argparse.ArgumentParser(add_help=False)
     base_subparser.add_argument(
+        "-m",
         "--manifest",
         type=Path,
         required=True,
